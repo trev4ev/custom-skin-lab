@@ -9,6 +9,12 @@ export type SknSubmesh = {
 };
 
 export type SknVertex = {
+  x: number;
+  y: number;
+  z: number;
+  nx: number;
+  ny: number;
+  nz: number;
   u: number;
   v: number;
 };
@@ -28,8 +34,8 @@ function readCString(buf: Uint8Array, offset: number, max: number): string {
 }
 
 /**
- * Parse an SKN ArrayBuffer into submeshes + UVs.
- * UV is always read from the Basic/Color/Tangent layouts at texcoord offset.
+ * Parse an SKN ArrayBuffer into submeshes + positions/normals/UVs.
+ * Basic layout (52 bytes): pos@0, boneIdx@12, weights@16, normal@32, uv@44.
  */
 export function parseSkn(buffer: ArrayBuffer): SknMesh {
   const view = new DataView(buffer);
@@ -40,7 +46,6 @@ export function parseSkn(buffer: ArrayBuffer): SknMesh {
     throw new Error(`Invalid SKN magic: 0x${magic.toString(16)}`);
   }
   const version = view.getUint16(4, true);
-  // minor at 6 unused
 
   let o = 8;
   const submeshes: SknSubmesh[] = [];
@@ -78,18 +83,16 @@ export function parseSkn(buffer: ArrayBuffer): SknMesh {
   let vertexType = 0;
 
   if (version === 4) {
-    // flags, indexCount, vertexCount, vertexSize, vertexType, AABB(24), sphere(16)
     o += 4; // flags
     indexCount = view.getInt32(o, true);
     vertexCount = view.getInt32(o + 4, true);
     vertexSize = view.getUint32(o + 8, true);
     vertexType = view.getUint32(o + 12, true);
-    o += 16 + 24 + 16;
+    o += 16 + 24 + 16; // counts + AABB + bounding sphere
   } else if (version === 0) {
     indexCount = submeshes[0]!.numIndices;
     vertexCount = submeshes[0]!.numVertices;
   } else {
-    // v2
     indexCount = view.getInt32(o, true);
     vertexCount = view.getInt32(o + 4, true);
     o += 8;
@@ -104,8 +107,8 @@ export function parseSkn(buffer: ArrayBuffer): SknMesh {
     o += 2;
   }
 
-  // Basic layout texcoord @ 0x2C; Color/Tangent keep texcoord there too.
   const uvOffset = 0x2c;
+  const normalOffset = 0x20;
   if (vertexSize < uvOffset + 8) {
     throw new Error(`Unsupported SKN vertex size ${vertexSize}`);
   }
@@ -114,6 +117,12 @@ export function parseSkn(buffer: ArrayBuffer): SknMesh {
   for (let i = 0; i < vertexCount; i++) {
     const base = o + i * vertexSize;
     vertices[i] = {
+      x: view.getFloat32(base, true),
+      y: view.getFloat32(base + 4, true),
+      z: view.getFloat32(base + 8, true),
+      nx: view.getFloat32(base + normalOffset, true),
+      ny: view.getFloat32(base + normalOffset + 4, true),
+      nz: view.getFloat32(base + normalOffset + 8, true),
       u: view.getFloat32(base + uvOffset, true),
       v: view.getFloat32(base + uvOffset + 4, true),
     };

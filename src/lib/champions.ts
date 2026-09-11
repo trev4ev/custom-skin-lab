@@ -25,6 +25,8 @@ export type ChampionOption = {
    * Submeshes missing here use defaultTexture.
    */
   submeshTextures: Record<string, ChampionTexture>;
+  /** Submeshes hidden by default in-game (skinMeshProperties.initialSubmeshToHide). */
+  hiddenSubmeshes: string[];
 };
 
 type StarterTexture = {
@@ -50,12 +52,13 @@ type StarterSkinMap = {
   defaultTexture: string;
   defaultFile: string;
   submeshToTexture: Record<string, string>;
+  hiddenSubmeshes?: string[];
   sknSourcePath: string | null;
 };
 
 const starters = starterTextures as StarterTexture[];
 const meshes = starterMeshes as StarterMesh[];
-const skinMaps = starterSkinMaps as StarterSkinMap[];
+const skinMaps = starterSkinMaps as unknown as StarterSkinMap[];
 
 function textureByExportPath(exportPath: string, folder: string): ChampionTexture {
   const hit =
@@ -98,6 +101,7 @@ function assetsFor(id: string, folder: string) {
     sknUrl: mesh?.sknUrl ?? null,
     defaultTexture,
     submeshTextures,
+    hiddenSubmeshes: map?.hiddenSubmeshes ?? [],
   };
 }
 

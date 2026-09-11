@@ -3,29 +3,48 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CHAMPIONS,
+  defaultTexturePath,
   textureForSubmesh,
   type ChampionOption,
   type ChampionTexture,
 } from "@/lib/champions";
 import {
   DEFAULT_RECOLOR,
-  recolorImageData,
   type RecolorSettings,
 } from "@/lib/recolor";
+import {
+  composeRecolorEdits,
+  createTextureEditStore,
+  settingsForScope,
+  writeScopeSettings,
+  type EditScope,
+  type TextureEditStore,
+} from "@/lib/recolor-edits";
 import { fetchSkn } from "@/lib/skn";
 import {
   buildIslandIndex,
   drawUvOverlay,
   hitTestIsland,
   islandsForSubmesh,
-  rasterizeSelectionMask,
+  islandsSharingUv,
   type IslandIndex,
 } from "@/lib/uv-islands";
+import { ModelViewer } from "@/components/ModelViewer";
 
 type Selection =
   | null
   | { type: "submesh"; name: string }
   | { type: "island"; id: number; submeshName: string };
+
+function scopeFromSelection(selection: Selection): EditScope {
+  if (!selection) return { type: "texture" };
+  if (selection.type === "submesh") return { type: "submesh", name: selection.name };
+  return {
+    type: "island",
+    id: selection.id,
+    submeshName: selection.submeshName,
+  };
+}
 
 function fileToImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -61,7 +80,7 @@ export function SkinStudio() {
   const [championId, setChampionId] = useState(CHAMPIONS[0]!.id);
   const [skinName, setSkinName] = useState("Ember Recolor");
   const [author, setAuthor] = useState("");
-  const [texturePath, setTexturePath] = useState(CHAMPIONS[0]!.defaultTexture.exportPath);
+  const [texturePath, setTexturePath] = useState(defaultTexturePath(CHAMPIONS[0]!));
   const [settings, setSettings] = useState<RecolorSettings>(DEFAULT_RECOLOR);
   const [hasImage, setHasImage] = useState(false);
   const [loadingTexture, setLoadingTexture] = useState(false);
@@ -73,9 +92,10 @@ export function SkinStudio() {
   const [islandIndex, setIslandIndex] = useState<IslandIndex | null>(null);
   const [activeSubmesh, setActiveSubmesh] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
+  const [hoveredIslandId, setHoveredIslandId] = useState<number | null>(null);
+  const [modelRevision, setModelRevision] = useState(0);
 
   const sourceRef = useRef<ImageData | null>(null);
-  const maskRef = useRef<Uint8Array | null>(null);
   /** Original ImageData per export path (for re-applying settings). */
   const sourcesByPathRef = useRef<Map<string, ImageData>>(new Map());
   /** Baked preview ImageData when leaving a texture so edits survive switches. */
@@ -87,6 +107,13 @@ export function SkinStudio() {
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const didInit = useRef(false);
+  /** Bumped on every champion switch so in-flight loads can't clobber newer state. */
+  const loadGenRef = useRef(0);
+  /** Sparse recolor edits per texture export path. */
+  const editsByPathRef = useRef<Map<string, TextureEditStore>>(new Map());
+  /** Cached raster masks keyed by `${w}x${h}:${scopeKey}`. */
+  const maskCacheRef = useRef<Map<string, Uint8Array>>(new Map());
+  const [editRevision, setEditRevision] = useState(0);
 
   const champion = useMemo(
     () => CHAMPIONS.find((c) => c.id === championId) ?? CHAMPIONS[0]!,
@@ -103,25 +130,14 @@ export function SkinStudio() {
     return islandsForSubmesh(islandIndex, activeSubmesh);
   }, [islandIndex, activeSubmesh]);
 
-  const rebuildMask = useCallback(() => {
-    const source = sourceRef.current;
-    if (!source || !islandIndex) {
-      maskRef.current = null;
-      return;
+  const getEditStore = useCallback((exportPath: string): TextureEditStore => {
+    let store = editsByPathRef.current.get(exportPath);
+    if (!store) {
+      store = createTextureEditStore();
+      editsByPathRef.current.set(exportPath, store);
     }
-    if (!selection) {
-      maskRef.current = null; // whole texture
-      return;
-    }
-    maskRef.current = rasterizeSelectionMask(
-      islandIndex,
-      source.width,
-      source.height,
-      selection.type === "island"
-        ? { type: "island", id: selection.id }
-        : { type: "submesh", name: selection.name },
-    );
-  }, [islandIndex, selection]);
+    return store;
+  }, []);
 
   const redrawOverlay = useCallback(() => {
     const overlay = overlayCanvasRef.current;
@@ -138,31 +154,72 @@ export function SkinStudio() {
     drawUvOverlay(ctx, islandIndex, overlay.width, overlay.height, {
       submeshFilter: activeSubmesh,
       selectedIslandId: selection?.type === "island" ? selection.id : null,
-      selectedSubmesh: selection?.type === "submesh" ? selection.name : activeSubmesh,
+      hoveredIslandId,
+      // Only mark submesh-selected when that is the actual selection scope.
+      // Using activeSubmesh here painted every island blue and hid hover.
+      selectedSubmesh: selection?.type === "submesh" ? selection.name : null,
     });
-  }, [islandIndex, showOverlay, activeSubmesh, selection]);
+  }, [islandIndex, showOverlay, activeSubmesh, selection, hoveredIslandId]);
 
   const applyRecolor = useCallback(() => {
     if (holdPreviewRef.current) {
       holdPreviewRef.current = false;
+      setModelRevision((n) => n + 1);
       return;
     }
     const source = sourceRef.current;
     const preview = previewCanvasRef.current;
     const tex = activeTextureRef.current;
-    if (!source || !preview) return;
+    if (!source || !preview || !tex) return;
     const ctx = preview.getContext("2d");
     if (!ctx) return;
-    const result = recolorImageData(source, settings, maskRef.current);
+    const store = getEditStore(tex.exportPath);
+    const result = composeRecolorEdits(
+      source,
+      store,
+      islandIndex,
+      maskCacheRef.current,
+    );
     ctx.putImageData(result, 0, 0);
-    if (tex) bakedByPathRef.current.set(tex.exportPath, result);
-  }, [settings]);
+    bakedByPathRef.current.set(tex.exportPath, result);
+    setModelRevision((n) => n + 1);
+  }, [getEditStore, islandIndex, editRevision]);
+
+  const syncSettingsFromStore = useCallback(() => {
+    const tex = activeTextureRef.current;
+    if (!tex) {
+      setSettings(DEFAULT_RECOLOR);
+      return;
+    }
+    const store = getEditStore(tex.exportPath);
+    setSettings(settingsForScope(store, scopeFromSelection(selection)));
+  }, [getEditStore, selection]);
+
+  const commitSettings = useCallback(
+    (next: RecolorSettings) => {
+      setSettings(next);
+      const tex = activeTextureRef.current;
+      if (!tex) return;
+      writeScopeSettings(
+        getEditStore(tex.exportPath),
+        scopeFromSelection(selection),
+        next,
+        islandIndex,
+      );
+      setEditRevision((n) => n + 1);
+    },
+    [getEditStore, selection, islandIndex],
+  );
+
+  // Keep sliders in sync with the active scope's stored values.
+  useEffect(() => {
+    syncSettingsFromStore();
+  }, [syncSettingsFromStore, texturePath]);
 
   useEffect(() => {
-    rebuildMask();
     applyRecolor();
     redrawOverlay();
-  }, [rebuildMask, applyRecolor, redrawOverlay]);
+  }, [applyRecolor, redrawOverlay]);
 
   const bakeCurrentPreview = useCallback(() => {
     const preview = previewCanvasRef.current;
@@ -235,16 +292,9 @@ export function SkinStudio() {
           opts?.restoreBaked === false
             ? null
             : bakedByPathRef.current.get(tex.exportPath);
-        if (baked) {
-          const preview = previewCanvasRef.current;
-          const ctx = preview?.getContext("2d");
-          if (preview && ctx) {
-            preview.width = baked.width;
-            preview.height = baked.height;
-            ctx.putImageData(baked, 0, 0);
-            holdPreviewRef.current = true;
-          }
-        }
+        // Prefer live compose from the edit store so island/submesh values stay correct.
+        holdPreviewRef.current = false;
+        setEditRevision((n) => n + 1);
         return;
       }
 
@@ -259,8 +309,9 @@ export function SkinStudio() {
     [bakeCurrentPreview, paintImage, paintImageData],
   );
 
-  const loadMesh = useCallback(async (next: ChampionOption) => {
+  const loadMesh = useCallback(async (next: ChampionOption, gen: number) => {
     if (!next.sknUrl) {
+      if (loadGenRef.current !== gen) return;
       setIslandIndex(null);
       setActiveSubmesh(null);
       setSelection(null);
@@ -269,7 +320,9 @@ export function SkinStudio() {
     setLoadingMesh(true);
     try {
       const mesh = await fetchSkn(next.sknUrl);
+      if (loadGenRef.current !== gen) return;
       const index = buildIslandIndex(mesh);
+      maskCacheRef.current.clear();
       setIslandIndex(index);
       const preferred =
         mesh.submeshes.find((s) => /body/i.test(s.name))?.name ??
@@ -286,32 +339,41 @@ export function SkinStudio() {
       );
       await switchToTexture(tex);
     } catch (err) {
+      if (loadGenRef.current !== gen) return;
       setIslandIndex(null);
       setActiveSubmesh(null);
       setSelection(null);
       setError(err instanceof Error ? err.message : "Failed to load mesh UVs");
     } finally {
-      setLoadingMesh(false);
+      if (loadGenRef.current === gen) setLoadingMesh(false);
     }
   }, [switchToTexture]);
 
   const loadStarterTexture = useCallback(
-    async (next: ChampionOption) => {
+    async (next: ChampionOption, gen: number) => {
+      if (loadGenRef.current !== gen) return;
       setLoadingTexture(true);
       setError(null);
       sourcesByPathRef.current.clear();
       bakedByPathRef.current.clear();
+      editsByPathRef.current.clear();
+      maskCacheRef.current.clear();
       activeTextureRef.current = null;
+      setSettings(DEFAULT_RECOLOR);
+      setEditRevision((n) => n + 1);
       try {
         const tex = next.defaultTexture;
         const img = await urlToImage(tex.url);
+        if (loadGenRef.current !== gen) return;
         await paintImage(img, tex);
-        await loadMesh(next);
+        if (loadGenRef.current !== gen) return;
+        await loadMesh(next, gen);
       } catch (err) {
+        if (loadGenRef.current !== gen) return;
         setHasImage(false);
         setError(err instanceof Error ? err.message : "Failed to load starter texture");
       } finally {
-        setLoadingTexture(false);
+        if (loadGenRef.current === gen) setLoadingTexture(false);
       }
     },
     [paintImage, loadMesh],
@@ -335,14 +397,23 @@ export function SkinStudio() {
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
-    void loadStarterTexture(CHAMPIONS[0]!);
+    const gen = ++loadGenRef.current;
+    void loadStarterTexture(CHAMPIONS[0]!, gen);
   }, [loadStarterTexture]);
 
   function selectChampion(next: ChampionOption) {
+    const gen = ++loadGenRef.current;
     setChampionId(next.id);
-    setTexturePath(next.defaultTexture.exportPath);
+    setTexturePath(defaultTexturePath(next));
+    // Drop previous champion's mesh immediately so the viewer can't pair
+    // the new champion's textures with the old geometry while loading.
+    setIslandIndex(null);
+    setActiveSubmesh(null);
     setSelection(null);
-    void loadStarterTexture(next);
+    setHoveredIslandId(null);
+    setLoadingMesh(!!next.sknUrl);
+    setStatus(`Loading ${next.name}…`);
+    void loadStarterTexture(next, gen);
   }
 
   async function onUpload(file: File | undefined) {
@@ -363,10 +434,11 @@ export function SkinStudio() {
         : current.exportPath;
       const tex: ChampionTexture = { url: current.url, exportPath: nextPath };
       bakeCurrentPreview();
+      editsByPathRef.current.set(nextPath, createTextureEditStore());
+      maskCacheRef.current.clear();
       await paintImage(img, tex);
       holdPreviewRef.current = false;
-      rebuildMask();
-      applyRecolor();
+      setEditRevision((n) => n + 1);
       redrawOverlay();
       setStatus(`Using uploaded texture: ${file.name}`);
     } catch (err) {
@@ -375,22 +447,22 @@ export function SkinStudio() {
   }
 
   function onPreviewClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!islandIndex || !previewCanvasRef.current) return;
-    const canvas = previewCanvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-    const u = x / Math.max(1, canvas.width - 1);
-    const v = y / Math.max(1, canvas.height - 1);
+    if (!islandIndex) return;
+    const uv = canvasUvFromEvent(e);
+    if (!uv) return;
 
-    const hit = hitTestIsland(islandIndex, u, v, activeSubmesh);
+    const hit = hitTestIsland(islandIndex, uv.u, uv.v, activeSubmesh);
     if (hit) {
       setSelection({ type: "island", id: hit.id, submeshName: hit.submeshName });
       setActiveSubmesh(hit.submeshName);
+      setHoveredIslandId(hit.id);
       setStatus(
-        `Selected island #${hit.id} in ${hit.submeshName} (${hit.faceCount} faces). Edits apply only here.`,
+        (() => {
+          const linked = islandsSharingUv(islandIndex, hit.id).length;
+          return linked > 1
+            ? `Selected island #${hit.id} in ${hit.submeshName} (${hit.faceCount} faces) · ${linked} mesh pieces share this UV.`
+            : `Selected island #${hit.id} in ${hit.submeshName} (${hit.faceCount} faces). Edits apply only here.`;
+        })(),
       );
       void switchToTexture(textureForSubmesh(champion, hit.submeshName));
     } else if (activeSubmesh) {
@@ -398,6 +470,68 @@ export function SkinStudio() {
       setStatus(`No island under cursor — editing whole ${activeSubmesh} submesh.`);
     }
   }
+
+  function canvasUvFromEvent(e: React.MouseEvent<HTMLCanvasElement>) {
+    // Events fire on the overlay; UV space matches the preview bitmap underneath.
+    const bitmap = previewCanvasRef.current;
+    const target = e.currentTarget;
+    if (!bitmap || !target) return null;
+    const rect = target.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return null;
+    const u = (e.clientX - rect.left) / rect.width;
+    const v = (e.clientY - rect.top) / rect.height;
+    return {
+      u: Math.min(1, Math.max(0, u)),
+      v: Math.min(1, Math.max(0, v)),
+    };
+  }
+
+  function onPreviewMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!islandIndex) return;
+    const uv = canvasUvFromEvent(e);
+    if (!uv) return;
+    const hit = hitTestIsland(islandIndex, uv.u, uv.v, activeSubmesh);
+    setHoveredIslandId(hit?.id ?? null);
+  }
+
+  function onPreviewLeave() {
+    setHoveredIslandId(null);
+  }
+
+  function onModelHoverIsland(islandId: number | null) {
+    setHoveredIslandId(islandId);
+  }
+
+  function onModelSelectIsland(islandId: number) {
+    if (!islandIndex) return;
+    const island = islandIndex.islands.find((i) => i.id === islandId);
+    if (!island) return;
+    setSelection({ type: "island", id: island.id, submeshName: island.submeshName });
+    setActiveSubmesh(island.submeshName);
+    setHoveredIslandId(island.id);
+    const linked = islandsSharingUv(islandIndex, island.id).length;
+    setStatus(
+      linked > 1
+        ? `Selected island #${island.id} in ${island.submeshName} (${island.faceCount} faces) · ${linked} mesh pieces share this UV.`
+        : `Selected island #${island.id} in ${island.submeshName} (${island.faceCount} faces). Edits apply only here.`,
+    );
+    void switchToTexture(textureForSubmesh(champion, island.submeshName));
+  }
+
+
+  const selectedIslandId =
+    selection?.type === "island" ? selection.id : null;
+
+  const selectedSharedIds = useMemo(() => {
+    if (!islandIndex || selection?.type !== "island") return null;
+    return new Set(islandsSharingUv(islandIndex, selection.id).map((i) => i.id));
+  }, [islandIndex, selection]);
+
+  const hoveredSharedIds = useMemo(() => {
+    if (!islandIndex || hoveredIslandId == null) return null;
+    return new Set(islandsSharingUv(islandIndex, hoveredIslandId).map((i) => i.id));
+  }, [islandIndex, hoveredIslandId]);
+
 
   function imageDataToPngBase64(image: ImageData): string {
     const c = document.createElement("canvas");
@@ -476,7 +610,7 @@ export function SkinStudio() {
       : `Island #${selection.id} (${selection.submeshName})`;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 md:py-14">
+    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-8 px-6 py-10 md:px-8 md:py-14">
       <header className="flex flex-col gap-3">
         <p className="text-sm font-medium tracking-[0.2em] text-copper uppercase">
           Custom Skin Lab
@@ -486,13 +620,34 @@ export function SkinStudio() {
         </h1>
         <p className="max-w-2xl text-base leading-relaxed text-ink/70">
           Pick a submesh (Body, Tails, …), click a UV island, then recolor only that
-          part. Submeshes that use a different diffuse — like Ahri&apos;s tails —
-          swap the preview automatically from skin data.
+          part. Inspect the live result on the bind-pose mesh — drag to orbit.
         </p>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-        <section className="rounded-2xl border border-ink/10 bg-panel/80 p-5 shadow-soft backdrop-blur">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex min-w-[200px] flex-col gap-1.5">
+          <span className="text-xs font-semibold tracking-wide text-ink/60 uppercase">
+            Champion
+          </span>
+          <select
+            value={champion.id}
+            onChange={(e) => {
+              const next = CHAMPIONS.find((c) => c.id === e.target.value);
+              if (next) selectChampion(next);
+            }}
+            className="field"
+          >
+            {CHAMPIONS.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.sknUrl ? "" : " (no mesh)"}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <section className="rounded-2xl border border-ink/10 bg-panel/80 p-5 shadow-soft backdrop-blur md:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="font-display text-xl text-ink">Preview</h2>
@@ -506,7 +661,16 @@ export function SkinStudio() {
               <button
                 type="button"
                 disabled={loadingTexture}
-                onClick={() => void loadStarterTexture(champion)}
+                onClick={() => {
+                  const gen = ++loadGenRef.current;
+                  setIslandIndex(null);
+                  setActiveSubmesh(null);
+                  setSelection(null);
+                  setHoveredIslandId(null);
+                  setLoadingMesh(!!champion.sknUrl);
+                  setStatus(`Loading ${champion.name}…`);
+                  void loadStarterTexture(champion, gen);
+                }}
                 className="rounded-full border border-ink/15 bg-paper px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink/5 disabled:opacity-40"
               >
                 Reset to starter
@@ -523,25 +687,45 @@ export function SkinStudio() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-ink/10 bg-checker">
-            <canvas ref={sourceCanvasRef} className="hidden" />
-            <div
-              className={`relative mx-auto w-fit max-w-full ${hasImage ? "" : "min-h-[280px] w-full"}`}
-            >
-              <canvas
-                ref={previewCanvasRef}
-                onClick={onPreviewClick}
-                className="block h-auto max-h-[460px] max-w-full cursor-crosshair"
+          <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+            <div className="overflow-hidden rounded-xl border border-ink/10 bg-checker">
+              <canvas ref={sourceCanvasRef} className="hidden" />
+              <div
+                className={`relative mx-auto w-fit max-w-full ${hasImage ? "" : "min-h-[220px] w-full"}`}
+              >
+                <canvas
+                  ref={previewCanvasRef}
+                  className="block h-auto max-h-[min(420px,46vh)] max-w-full"
+                />
+                <canvas
+                  ref={overlayCanvasRef}
+                  onClick={onPreviewClick}
+                  onMouseMove={onPreviewMove}
+                  onMouseLeave={onPreviewLeave}
+                  className="absolute inset-0 h-full w-full cursor-crosshair"
+                />
+                {!hasImage && !loadingTexture && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-8 text-center text-sm text-ink/50">
+                    Choose a starter champion or upload an extracted texture.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <ModelViewer
+                mesh={islandIndex?.mesh ?? null}
+                champion={champion}
+                revision={modelRevision}
+                activeExportPath={texturePath}
+                previewCanvasRef={previewCanvasRef}
+                bakedByPathRef={bakedByPathRef}
+                islandIndex={islandIndex}
+                hoverIslandId={hoveredIslandId}
+                selectedIslandId={selectedIslandId}
+                onHoverIsland={onModelHoverIsland}
+                onSelectIsland={onModelSelectIsland}
               />
-              <canvas
-                ref={overlayCanvasRef}
-                className="pointer-events-none absolute inset-0 h-full w-full"
-              />
-              {!hasImage && !loadingTexture && (
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-8 text-center text-sm text-ink/50">
-                  Choose a starter champion or upload an extracted texture.
-                </div>
-              )}
             </div>
           </div>
 
@@ -623,13 +807,16 @@ export function SkinStudio() {
               </p>
               <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
                 {activeIslands.slice(0, 40).map((island) => {
-                  const active =
-                    selection?.type === "island" && selection.id === island.id;
+                  const active = selectedSharedIds?.has(island.id) ?? false;
+                  const hovered =
+                    !active && (hoveredSharedIds?.has(island.id) ?? false);
                   return (
                     <button
                       key={island.id}
                       type="button"
                       title={`${island.faceCount} faces`}
+                      onMouseEnter={() => setHoveredIslandId(island.id)}
+                      onMouseLeave={() => setHoveredIslandId(null)}
                       onClick={() => {
                         setSelection({
                           type: "island",
@@ -637,11 +824,18 @@ export function SkinStudio() {
                           submeshName: island.submeshName,
                         });
                         setStatus(
-                          `Selected island #${island.id} (${island.faceCount} faces).`,
+                          (() => {
+                            const linked = islandIndex
+                              ? islandsSharingUv(islandIndex, island.id).length
+                              : 1;
+                            return linked > 1
+                              ? `Selected island #${island.id} (${island.faceCount} faces) · ${linked} mesh pieces share this UV.`
+                              : `Selected island #${island.id} (${island.faceCount} faces).`;
+                          })(),
                         );
                       }}
                       className={`rounded-md px-2 py-1 font-mono text-[10px] transition ${
-                        active
+                        active || hovered
                           ? "bg-amber-400 text-ink"
                           : "bg-ink/5 text-ink/70 hover:bg-ink/10"
                       }`}
@@ -666,7 +860,7 @@ export function SkinStudio() {
               max={180}
               value={settings.hueShift}
               suffix="°"
-              onChange={(hueShift) => setSettings((s) => ({ ...s, hueShift }))}
+              onChange={(hueShift) => commitSettings({ ...settings, hueShift })}
             />
             <Slider
               label="Saturation"
@@ -674,7 +868,7 @@ export function SkinStudio() {
               max={200}
               value={settings.saturation}
               suffix="%"
-              onChange={(saturation) => setSettings((s) => ({ ...s, saturation }))}
+              onChange={(saturation) => commitSettings({ ...settings, saturation })}
             />
             <Slider
               label="Brightness"
@@ -682,14 +876,14 @@ export function SkinStudio() {
               max={200}
               value={settings.brightness}
               suffix="%"
-              onChange={(brightness) => setSettings((s) => ({ ...s, brightness }))}
+              onChange={(brightness) => commitSettings({ ...settings, brightness })}
             />
             <label className="flex items-center gap-2 text-sm text-ink/80">
               <input
                 type="checkbox"
                 checked={settings.protectShadows}
                 onChange={(e) =>
-                  setSettings((s) => ({ ...s, protectShadows: e.target.checked }))
+                  commitSettings({ ...settings, protectShadows: e.target.checked })
                 }
                 className="size-4 accent-copper"
               />
@@ -700,24 +894,6 @@ export function SkinStudio() {
 
         <section className="flex flex-col gap-5 rounded-2xl border border-ink/10 bg-panel/80 p-5 shadow-soft backdrop-blur">
           <h2 className="font-display text-xl text-ink">Mod package</h2>
-
-          <Field label="Champion">
-            <select
-              value={champion.id}
-              onChange={(e) => {
-                const next = CHAMPIONS.find((c) => c.id === e.target.value);
-                if (next) selectChampion(next);
-              }}
-              className="field"
-            >
-              {CHAMPIONS.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {c.sknUrl ? "" : " (no mesh)"}
-                </option>
-              ))}
-            </select>
-          </Field>
 
           <Field label="Skin name">
             <input
@@ -747,7 +923,9 @@ export function SkinStudio() {
 
           <div className="rounded-xl border border-dashed border-ink/15 bg-ink/[0.03] p-4 text-sm leading-relaxed text-ink/65">
             Selection scope: <span className="text-ink">{selectionLabel}</span>.
-            Export writes the current preview (with island edits applied).
+            Island edits are remembered when you switch islands; editing a whole
+            submesh (or the entire texture) replaces nested island values for that
+            scope. Export writes the composed preview.
           </div>
 
           <button
@@ -770,7 +948,6 @@ export function SkinStudio() {
             </p>
           )}
         </section>
-      </div>
     </div>
   );
 }

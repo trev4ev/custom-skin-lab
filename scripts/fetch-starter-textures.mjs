@@ -175,6 +175,12 @@ for (const [id, folder] of champions) {
     }
   }
 
+  const hideRaw = smp["initialSubmeshToHide"] || "";
+  const hiddenSubmeshes = String(hideRaw)
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   skinMaps.push({
     id,
     folder,
@@ -182,6 +188,7 @@ for (const [id, folder] of champions) {
     defaultFile: downloaded.get(defaultTex).file,
     /** Submeshes without an entry use defaultTexture */
     submeshToTexture,
+    hiddenSubmeshes,
     sknSourcePath: smp.simpleSkin || null,
   });
 }

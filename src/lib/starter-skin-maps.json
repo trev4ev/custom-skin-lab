@@ -9,7 +9,11 @@
       "Tails": "assets/characters/ahri/skins/base/ahri_base_tails_tx_cm.png",
       "Body": "assets/characters/ahri/skins/base/ahri_base_tx_cm.png"
     },
-    "sknSourcePath": "ASSETS/Characters/Ahri/Skins/Base/Ahri_Base.skn"
+    "sknSourcePath": "ASSETS/Characters/Ahri/Skins/Base/Ahri_Base.skn",
+    "hiddenSubmeshes": [
+      "Tail_Large",
+      "Body_Proxy"
+    ]
   },
   {
     "id": "Yasuo",
@@ -19,7 +23,11 @@
     "submeshToTexture": {
       "Weapon_Trail": "assets/characters/yasuo/skins/base/yasuo_weapon_trail_tx_cm.png"
     },
-    "sknSourcePath": "ASSETS/Characters/Yasuo/Skins/Base/Yasuo.skn"
+    "sknSourcePath": "ASSETS/Characters/Yasuo/Skins/Base/Yasuo.skn",
+    "hiddenSubmeshes": [
+      "Yasuo_Instrument_Mat",
+      "Weapon_Trail"
+    ]
   },
   {
     "id": "Jinx",
@@ -27,7 +35,8 @@
     "defaultTexture": "assets/characters/jinx/skins/base/jinx_base_tx_cm.png",
     "defaultFile": "/starters/jinx.png",
     "submeshToTexture": {},
-    "sknSourcePath": "ASSETS/Characters/Jinx/Skins/Base/Jinx.skn"
+    "sknSourcePath": "ASSETS/Characters/Jinx/Skins/Base/Jinx.skn",
+    "hiddenSubmeshes": []
   },
   {
     "id": "Lux",
@@ -35,7 +44,8 @@
     "defaultTexture": "assets/characters/lux/skins/base/lux_base_cm_tx.png",
     "defaultFile": "/starters/lux.png",
     "submeshToTexture": {},
-    "sknSourcePath": "ASSETS/Characters/Lux/Skins/Base/Lux.skn"
+    "sknSourcePath": "ASSETS/Characters/Lux/Skins/Base/Lux.skn",
+    "hiddenSubmeshes": []
   },
   {
     "id": "Zed",
@@ -43,7 +53,8 @@
     "defaultTexture": "assets/characters/zed/skins/base/zed_base_tx_cm.png",
     "defaultFile": "/starters/zed.png",
     "submeshToTexture": {},
-    "sknSourcePath": "ASSETS/Characters/Zed/Skins/Base/Zed.skn"
+    "sknSourcePath": "ASSETS/Characters/Zed/Skins/Base/Zed.skn",
+    "hiddenSubmeshes": []
   },
   {
     "id": "MissFortune",
@@ -51,7 +62,8 @@
     "defaultTexture": "assets/characters/missfortune/skins/base/missfortune_base_tx_cm.png",
     "defaultFile": "/starters/missfortune.png",
     "submeshToTexture": {},
-    "sknSourcePath": "ASSETS/Characters/MissFortune/Skins/Base/MissFortune.skn"
+    "sknSourcePath": "ASSETS/Characters/MissFortune/Skins/Base/MissFortune.skn",
+    "hiddenSubmeshes": []
   },
   {
     "id": "Thresh",
@@ -59,7 +71,8 @@
     "defaultTexture": "assets/characters/thresh/skins/base/thresh_base_tx_cm.png",
     "defaultFile": "/starters/thresh.png",
     "submeshToTexture": {},
-    "sknSourcePath": "ASSETS/Characters/Thresh/Skins/Base/Thresh.skn"
+    "sknSourcePath": "ASSETS/Characters/Thresh/Skins/Base/Thresh.skn",
+    "hiddenSubmeshes": []
   },
   {
     "id": "LeeSin",
@@ -67,7 +80,8 @@
     "defaultTexture": "assets/characters/leesin/skins/base/leesin_base_tx_cm.png",
     "defaultFile": "/starters/leesin.png",
     "submeshToTexture": {},
-    "sknSourcePath": "ASSETS/Characters/LeeSin/Skins/Base/LeeSin_Base.skn"
+    "sknSourcePath": "ASSETS/Characters/LeeSin/Skins/Base/LeeSin_Base.skn",
+    "hiddenSubmeshes": []
   },
   {
     "id": "Akali",
@@ -84,7 +98,15 @@
       "ramen_noodles": "assets/characters/akali/skins/base/akali_base_prop_tx_cm.png",
       "chopsticks": "assets/characters/akali/skins/base/akali_base_prop_tx_cm.png"
     },
-    "sknSourcePath": "ASSETS/Characters/Akali/Skins/Base/Akali.skn"
+    "sknSourcePath": "ASSETS/Characters/Akali/Skins/Base/Akali.skn",
+    "hiddenSubmeshes": [
+      "kama_right",
+      "kunais",
+      "recall",
+      "ramen",
+      "ramen_noodles",
+      "chopsticks"
+    ]
   },
   {
     "id": "KaiSa",
@@ -95,6 +117,13 @@
       "Kaisa_Base_Frog_Mat": "assets/characters/kaisa/skins/base/kaisa_base_frog_tx_cm.png",
       "Kaisa_Base_VoidFrog_Mat": "assets/characters/kaisa/skins/base/kaisa_base_joke_frogvoid_tx_cm.png"
     },
-    "sknSourcePath": "ASSETS/Characters/Kaisa/Skins/Base/Kaisa_Base.skn"
+    "sknSourcePath": "ASSETS/Characters/Kaisa/Skins/Base/Kaisa_Base.skn",
+    "hiddenSubmeshes": [
+      "Kaisa_Helmet_Mat",
+      "Kaisa_Base_Frog_Mat",
+      "Kaisa_Pistols_Mat",
+      "Kaisa_Q2_Mat",
+      "Kaisa_Base_VoidFrog_Mat"
+    ]
   }
 ]

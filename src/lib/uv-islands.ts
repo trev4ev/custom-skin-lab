@@ -187,6 +187,45 @@ export function islandsForSubmesh(index: IslandIndex, submeshName: string): UvIs
   return index.islands.filter((i) => i.submeshName === submeshName);
 }
 
+function uvBoundsArea(island: UvIsland): number {
+  return Math.max(0, island.maxU - island.minU) * Math.max(0, island.maxV - island.minV);
+}
+
+/** IoU of two island UV bounding boxes. */
+function uvBoundsIoU(a: UvIsland, b: UvIsland): number {
+  const minU = Math.max(a.minU, b.minU);
+  const maxU = Math.min(a.maxU, b.maxU);
+  const minV = Math.max(a.minV, b.minV);
+  const maxV = Math.min(a.maxV, b.maxV);
+  const inter = Math.max(0, maxU - minU) * Math.max(0, maxV - minV);
+  if (inter <= 0) return 0;
+  const uni = uvBoundsArea(a) + uvBoundsArea(b) - inter;
+  return uni > 0 ? inter / uni : 0;
+}
+
+/**
+ * Mesh-edge islands that reuse the same UV footprint (mirrored / duplicated parts).
+ * High bbox overlap means they paint the same atlas region and should highlight together.
+ */
+export function islandsSharingUv(
+  index: IslandIndex,
+  islandId: number,
+  /** Minimum UV-bbox IoU to treat as the same atlas footprint. */
+  minIoU = 0.85,
+): UvIsland[] {
+  const target = index.islands.find((i) => i.id === islandId);
+  if (!target) return [];
+  const shared: UvIsland[] = [];
+  for (const other of index.islands) {
+    if (other.submeshName !== target.submeshName) continue;
+    if (other.id === target.id || uvBoundsIoU(target, other) >= minIoU) {
+      shared.push(other);
+    }
+  }
+  return shared;
+}
+
+
 /**
  * Rasterize selection into an alpha mask matching texture size.
  * selection: null = whole texture; {type:'submesh', name}; {type:'island', id}
@@ -265,11 +304,25 @@ export function drawUvOverlay(
   opts: {
     submeshFilter?: string | null;
     selectedIslandId?: number | null;
+    hoveredIslandId?: number | null;
     selectedSubmesh?: string | null;
   } = {},
 ) {
   const { mesh, islands } = index;
   ctx.clearRect(0, 0, width, height);
+
+  // Expand hover/selection to every island that reuses the same UV footprint,
+  // matching the 3D mesh highlight behavior for mirrored/duplicated parts.
+  const selectedIds = new Set(
+    opts.selectedIslandId != null
+      ? islandsSharingUv(index, opts.selectedIslandId).map((i) => i.id)
+      : [],
+  );
+  const hoveredIds = new Set(
+    opts.hoveredIslandId != null
+      ? islandsSharingUv(index, opts.hoveredIslandId).map((i) => i.id)
+      : [],
+  );
 
   const toXY = (u: number, v: number) => ({
     x: u * (width - 1),
@@ -278,16 +331,20 @@ export function drawUvOverlay(
 
   for (const island of islands) {
     if (opts.submeshFilter && island.submeshName !== opts.submeshFilter) continue;
-    const isSelectedIsland = opts.selectedIslandId === island.id;
     const isSelectedSubmesh =
       opts.selectedSubmesh === island.submeshName && opts.selectedIslandId == null;
 
-    ctx.strokeStyle = isSelectedIsland
-      ? "rgba(255, 196, 72, 0.95)"
-      : isSelectedSubmesh
-        ? "rgba(80, 180, 255, 0.7)"
-        : "rgba(255, 255, 255, 0.28)";
-    ctx.lineWidth = isSelectedIsland ? 1.5 : 0.75;
+    // Hover keeps a filled tint; selection is outline-only so the texture stays readable.
+    const isHovered = hoveredIds.has(island.id);
+    const isSelected = selectedIds.has(island.id);
+    ctx.strokeStyle = isSelected
+      ? "rgba(255, 214, 90, 1)"
+      : isHovered
+        ? "rgba(255, 140, 40, 1)"
+        : isSelectedSubmesh
+          ? "rgba(120, 190, 255, 0.45)"
+          : "rgba(255, 255, 255, 0.22)";
+    ctx.lineWidth = isSelected ? 2.5 : isHovered ? 2.25 : 0.7;
 
     for (const start of island.faceStarts) {
       const a = toXY(mesh.vertices[mesh.indices[start]!]!.u, mesh.vertices[mesh.indices[start]!]!.v);
@@ -304,8 +361,8 @@ export function drawUvOverlay(
       ctx.lineTo(b.x, b.y);
       ctx.lineTo(c.x, c.y);
       ctx.closePath();
-      if (isSelectedIsland) {
-        ctx.fillStyle = "rgba(255, 196, 72, 0.18)";
+      if (isHovered) {
+        ctx.fillStyle = "rgba(255, 140, 40, 0.36)";
         ctx.fill();
       }
       ctx.stroke();
