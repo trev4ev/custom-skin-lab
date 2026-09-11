@@ -1,0 +1,130 @@
+[
+  {
+    "id": "Ahri",
+    "folder": "ahri",
+    "file": "/starters/ahri.png",
+    "exportPath": "assets/characters/ahri/skins/base/ahri_base_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/ahri/skins/base/ahri_base_tx_cm.png",
+    "bytes": 550913
+  },
+  {
+    "id": "Ahri",
+    "folder": "ahri",
+    "file": "/starters/ahri_base_tails_tx_cm.png",
+    "exportPath": "assets/characters/ahri/skins/base/ahri_base_tails_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/ahri/skins/base/ahri_base_tails_tx_cm.png",
+    "bytes": 308994
+  },
+  {
+    "id": "Yasuo",
+    "folder": "yasuo",
+    "file": "/starters/yasuo.png",
+    "exportPath": "assets/characters/yasuo/skins/base/yasuo_base_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/yasuo/skins/base/yasuo_base_tx_cm.png",
+    "bytes": 212236
+  },
+  {
+    "id": "Yasuo",
+    "folder": "yasuo",
+    "file": "/starters/yasuo_weapon_trail_tx_cm.png",
+    "exportPath": "assets/characters/yasuo/skins/base/yasuo_weapon_trail_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/yasuo/skins/base/yasuo_weapon_trail_tx_cm.png",
+    "bytes": 7061
+  },
+  {
+    "id": "Jinx",
+    "folder": "jinx",
+    "file": "/starters/jinx.png",
+    "exportPath": "assets/characters/jinx/skins/base/jinx_base_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/jinx/skins/base/jinx_base_tx_cm.png",
+    "bytes": 417653
+  },
+  {
+    "id": "Lux",
+    "folder": "lux",
+    "file": "/starters/lux.png",
+    "exportPath": "assets/characters/lux/skins/base/lux_base_cm_tx.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/lux/skins/base/lux_base_cm_tx.png",
+    "bytes": 206608
+  },
+  {
+    "id": "Zed",
+    "folder": "zed",
+    "file": "/starters/zed.png",
+    "exportPath": "assets/characters/zed/skins/base/zed_base_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/zed/skins/base/zed_base_tx_cm.png",
+    "bytes": 165825
+  },
+  {
+    "id": "MissFortune",
+    "folder": "missfortune",
+    "file": "/starters/missfortune.png",
+    "exportPath": "assets/characters/missfortune/skins/base/missfortune_base_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/missfortune/skins/base/missfortune_base_tx_cm.png",
+    "bytes": 183806
+  },
+  {
+    "id": "Thresh",
+    "folder": "thresh",
+    "file": "/starters/thresh.png",
+    "exportPath": "assets/characters/thresh/skins/base/thresh_base_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/thresh/skins/base/thresh_base_tx_cm.png",
+    "bytes": 232117
+  },
+  {
+    "id": "LeeSin",
+    "folder": "leesin",
+    "file": "/starters/leesin.png",
+    "exportPath": "assets/characters/leesin/skins/base/leesin_base_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/leesin/skins/base/leesin_base_tx_cm.png",
+    "bytes": 700889
+  },
+  {
+    "id": "Akali",
+    "folder": "akali",
+    "file": "/starters/akali.png",
+    "exportPath": "assets/characters/akali/skins/base/akali_base_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/akali/skins/base/akali_base_tx_cm.png",
+    "bytes": 611860
+  },
+  {
+    "id": "Akali",
+    "folder": "akali",
+    "file": "/starters/akali_base_weapon_tx_cm.png",
+    "exportPath": "assets/characters/akali/skins/base/akali_base_weapon_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/akali/skins/base/akali_base_weapon_tx_cm.png",
+    "bytes": 51582
+  },
+  {
+    "id": "Akali",
+    "folder": "akali",
+    "file": "/starters/akali_base_prop_tx_cm.png",
+    "exportPath": "assets/characters/akali/skins/base/akali_base_prop_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/akali/skins/base/akali_base_prop_tx_cm.png",
+    "bytes": 54833
+  },
+  {
+    "id": "KaiSa",
+    "folder": "kaisa",
+    "file": "/starters/kaisa.png",
+    "exportPath": "assets/characters/kaisa/skins/base/kaisa_base_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/kaisa/skins/base/kaisa_base_tx_cm.png",
+    "bytes": 541542
+  },
+  {
+    "id": "KaiSa",
+    "folder": "kaisa",
+    "file": "/starters/kaisa_base_frog_tx_cm.png",
+    "exportPath": "assets/characters/kaisa/skins/base/kaisa_base_frog_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/kaisa/skins/base/kaisa_base_frog_tx_cm.png",
+    "bytes": 50078
+  },
+  {
+    "id": "KaiSa",
+    "folder": "kaisa",
+    "file": "/starters/kaisa_base_joke_frogvoid_tx_cm.png",
+    "exportPath": "assets/characters/kaisa/skins/base/kaisa_base_joke_frogvoid_tx_cm.png",
+    "source": "https://raw.communitydragon.org/latest/game/assets/characters/kaisa/skins/base/kaisa_base_joke_frogvoid_tx_cm.png",
+    "bytes": 16063
+  }
+]

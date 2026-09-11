@@ -1,0 +1,72 @@
+[
+  {
+    "id": "Ahri",
+    "folder": "ahri",
+    "sknUrl": "/starters/meshes/ahri_base.skn",
+    "sourcePath": "ASSETS/Characters/Ahri/Skins/Base/Ahri_Base.skn",
+    "bytes": 847032
+  },
+  {
+    "id": "Yasuo",
+    "folder": "yasuo",
+    "sknUrl": "/starters/meshes/yasuo_base.skn",
+    "sourcePath": "ASSETS/Characters/Yasuo/Skins/Base/Yasuo.skn",
+    "bytes": 377902
+  },
+  {
+    "id": "Jinx",
+    "folder": "jinx",
+    "sknUrl": "/starters/meshes/jinx_base.skn",
+    "sourcePath": "ASSETS/Characters/Jinx/Skins/Base/Jinx.skn",
+    "bytes": 612606
+  },
+  {
+    "id": "Lux",
+    "folder": "lux",
+    "sknUrl": "/starters/meshes/lux_base.skn",
+    "sourcePath": "ASSETS/Characters/Lux/Skins/Base/Lux.skn",
+    "bytes": 200204
+  },
+  {
+    "id": "Zed",
+    "folder": "zed",
+    "sknUrl": "/starters/meshes/zed_base.skn",
+    "sourcePath": "ASSETS/Characters/Zed/Skins/Base/Zed.skn",
+    "bytes": 336354
+  },
+  {
+    "id": "MissFortune",
+    "folder": "missfortune",
+    "sknUrl": "/starters/meshes/missfortune_base.skn",
+    "sourcePath": "ASSETS/Characters/MissFortune/Skins/Base/MissFortune.skn",
+    "bytes": 282200
+  },
+  {
+    "id": "Thresh",
+    "folder": "thresh",
+    "sknUrl": "/starters/meshes/thresh_base.skn",
+    "sourcePath": "ASSETS/Characters/Thresh/Skins/Base/Thresh.skn",
+    "bytes": 277452
+  },
+  {
+    "id": "LeeSin",
+    "folder": "leesin",
+    "sknUrl": "/starters/meshes/leesin_base.skn",
+    "sourcePath": "ASSETS/Characters/LeeSin/Skins/Base/LeeSin_Base.skn",
+    "bytes": 621596
+  },
+  {
+    "id": "Akali",
+    "folder": "akali",
+    "sknUrl": "/starters/meshes/akali_base.skn",
+    "sourcePath": "ASSETS/Characters/Akali/Skins/Base/Akali.skn",
+    "bytes": 454346
+  },
+  {
+    "id": "KaiSa",
+    "folder": "kaisa",
+    "sknUrl": "/starters/meshes/kaisa_base.skn",
+    "sourcePath": "ASSETS/Characters/Kaisa/Skins/Base/Kaisa_Base.skn",
+    "bytes": 917580
+  }
+]
