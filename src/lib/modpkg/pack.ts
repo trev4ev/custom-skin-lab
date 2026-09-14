@@ -6,7 +6,7 @@ export const README_PATH = "_meta_/readme.md";
 export const LICENSE_PATH = "_meta_/license";
 export const THUMBNAIL_PATH = "_meta_/thumbnail.webp";
 
-const MAGIC = Buffer.from("_modpkg_");
+const MAGIC = new TextEncoder().encode("_modpkg_");
 const FORMAT_VERSION = 1;
 const CHUNK_RECORD_SIZE = 61;
 const INDEX_NONE = 0xffffffff;
@@ -64,14 +64,31 @@ type Prepared = {
   meta: boolean;
 };
 
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const p of parts) {
+    out.set(p, o);
+    o += p.length;
+  }
+  return out;
+}
+
+function utf8(s: string): Uint8Array {
+  return new TextEncoder().encode(s);
+}
+
+/** Browser-safe byte writer (no Node Buffer). */
 class Writer {
-  private parts: Buffer[] = [];
+  private parts: Uint8Array[] = [];
   private scratch: number[] = [];
   length = 0;
 
   private flush() {
     if (!this.scratch.length) return;
-    const buf = Buffer.from(this.scratch);
+    const buf = Uint8Array.from(this.scratch);
     this.parts.push(buf);
     this.length += buf.length;
     this.scratch = [];
@@ -100,39 +117,38 @@ class Writer {
     this.writeU32(Number((v >> BigInt(32)) & mask));
   }
 
-  writeBytes(bytes: Uint8Array | Buffer) {
+  writeBytes(bytes: Uint8Array) {
     this.flush();
-    const buf = Buffer.from(bytes);
-    this.parts.push(buf);
-    this.length += buf.length;
+    this.parts.push(bytes);
+    this.length += bytes.length;
   }
 
   writeCString(s: string) {
-    this.writeBytes(Buffer.from(s, "utf8"));
+    this.writeBytes(utf8(s));
     this.writeU8(0);
   }
 
   align8() {
     this.flush();
     const pad = (8 - (this.length % 8)) % 8;
-    if (pad) this.writeBytes(Buffer.alloc(pad));
+    if (pad) this.writeBytes(new Uint8Array(pad));
   }
 
   reserve(size: number): number {
     this.flush();
     const offset = this.length;
-    this.parts.push(Buffer.alloc(size));
+    this.parts.push(new Uint8Array(size));
     this.length += size;
     return offset;
   }
 
-  patch(offset: number, bytes: Buffer) {
+  patch(offset: number, bytes: Uint8Array) {
     this.flush();
     let cursor = 0;
     for (const part of this.parts) {
       const end = cursor + part.length;
       if (offset >= cursor && offset < end) {
-        bytes.copy(part, offset - cursor);
+        part.set(bytes, offset - cursor);
         return;
       }
       cursor = end;
@@ -140,9 +156,9 @@ class Writer {
     throw new Error(`patch offset ${offset} out of range`);
   }
 
-  toBuffer(): Buffer {
+  toBytes(): Uint8Array {
     this.flush();
-    return Buffer.concat(this.parts);
+    return concatBytes(this.parts);
   }
 }
 
@@ -152,13 +168,13 @@ function normalizePath(path: string) {
 
 /**
  * Build a League Toolkit–compatible `.modpkg` (format version 1).
- * Chunks are stored uncompressed (always valid per the format).
+ * Chunks are stored uncompressed. Works in the browser for static hosting.
  */
-export async function packModpkg(input: PackModpkgInput): Promise<Buffer> {
+export async function packModpkg(input: PackModpkgInput): Promise<Uint8Array> {
   const layers = [{ name: "base", priority: 0 }];
   const layerIndex = new Map([["base", 0]]);
 
-  const metadataBytes = Buffer.from(
+  const metadataBytes = new Uint8Array(
     msgpackEncode({
       schema_version: input.metadata.schema_version ?? 3,
       name: input.metadata.name,
@@ -207,7 +223,7 @@ export async function packModpkg(input: PackModpkgInput): Promise<Buffer> {
       pathHash: await hashPath(README_PATH),
       layer: "",
       wad: "",
-      data: Buffer.from(input.readme, "utf8"),
+      data: utf8(input.readme),
       meta: true,
     });
   }
@@ -217,7 +233,7 @@ export async function packModpkg(input: PackModpkgInput): Promise<Buffer> {
       pathHash: await hashPath(LICENSE_PATH),
       layer: "",
       wad: "",
-      data: Buffer.from(input.licenseText, "utf8"),
+      data: utf8(input.licenseText),
       meta: true,
     });
   }
@@ -239,7 +255,9 @@ export async function packModpkg(input: PackModpkgInput): Promise<Buffer> {
       meta: false,
     });
   }
-  regular.sort((a, b) => a.wad.localeCompare(b.wad) || a.layer.localeCompare(b.layer));
+  regular.sort(
+    (a, b) => a.wad.localeCompare(b.wad) || a.layer.localeCompare(b.layer),
+  );
 
   const all = [...prepared, ...regular];
 
@@ -270,7 +288,7 @@ export async function packModpkg(input: PackModpkgInput): Promise<Buffer> {
 
   out.writeU32(layers.length);
   for (const layer of layers) {
-    const name = Buffer.from(layer.name, "utf8");
+    const name = utf8(layer.name);
     out.writeU32(name.length);
     out.writeBytes(name);
     out.writeI32(layer.priority);
@@ -295,8 +313,12 @@ export async function packModpkg(input: PackModpkgInput): Promise<Buffer> {
     out.writeBytes(stored);
 
     const pathIdx = pathIndex.get(chunk.path.toLowerCase()) ?? 0;
-    const layerIdx = chunk.meta ? INDEX_NONE : (layerIndex.get(chunk.layer) ?? INDEX_NONE);
-    const wadIdx = chunk.meta ? INDEX_NONE : (wadIndex.get(chunk.wad) ?? INDEX_NONE);
+    const layerIdx = chunk.meta
+      ? INDEX_NONE
+      : (layerIndex.get(chunk.layer) ?? INDEX_NONE);
+    const wadIdx = chunk.meta
+      ? INDEX_NONE
+      : (wadIndex.get(chunk.wad) ?? INDEX_NONE);
 
     toc.writeU64(chunk.pathHash);
     toc.writeU64(dataOffset);
@@ -310,8 +332,8 @@ export async function packModpkg(input: PackModpkgInput): Promise<Buffer> {
     toc.writeU32(wadIdx);
   }
 
-  out.patch(tocOffset, toc.toBuffer());
-  return out.toBuffer();
+  out.patch(tocOffset, toc.toBytes());
+  return out.toBytes();
 }
 
 export function slugify(value: string): string {

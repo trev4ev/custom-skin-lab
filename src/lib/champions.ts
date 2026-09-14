@@ -1,6 +1,7 @@
 import starterTextures from "@/lib/starter-textures.json";
 import starterMeshes from "@/lib/starter-meshes.json";
 import starterSkinMaps from "@/lib/starter-skin-maps.json";
+import { publicUrl } from "@/lib/public-url";
 
 export type ChampionTexture = {
   /** Public URL for the bundled PNG */
@@ -64,10 +65,10 @@ function textureByExportPath(exportPath: string, folder: string): ChampionTextur
   const hit =
     starters.find((s) => s.exportPath === exportPath) ??
     starters.find((s) => s.folder === folder && s.exportPath.endsWith(exportPath.split("/").pop()!));
-  if (hit) return { url: hit.file, exportPath: hit.exportPath };
+  if (hit) return { url: publicUrl(hit.file), exportPath: hit.exportPath };
   // Fallback: Community Dragon-style path even if not bundled
   return {
-    url: `/starters/${exportPath.split("/").pop()}`,
+    url: publicUrl(`/starters/${exportPath.split("/").pop()}`),
     exportPath,
   };
 }
@@ -98,7 +99,7 @@ function assetsFor(id: string, folder: string) {
   return {
     starterTextureUrl: defaultTexture.url,
     exportPath: defaultTexture.exportPath,
-    sknUrl: mesh?.sknUrl ?? null,
+    sknUrl: mesh?.sknUrl ? publicUrl(mesh.sknUrl) : null,
     defaultTexture,
     submeshTextures,
     hiddenSubmeshes: map?.hiddenSubmeshes ?? [],
