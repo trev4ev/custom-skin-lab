@@ -13,7 +13,7 @@ import {
 export type EditScope =
   | { type: "texture" }
   | { type: "submesh"; name: string }
-  | { type: "island"; id: number; submeshName: string };
+  | { type: "island"; ids: number[]; submeshName: string };
 
 /**
  * Sparse recolor store for one texture export path.
@@ -61,8 +61,12 @@ export function settingsForScope(
       store.submeshes.get(scope.name) ?? store.texture ?? DEFAULT_RECOLOR,
     );
   }
+  const primaryId = scope.ids[0];
+  if (primaryId == null) {
+    return cloneSettings(store.texture ?? DEFAULT_RECOLOR);
+  }
   return cloneSettings(
-    store.islands.get(scope.id) ??
+    store.islands.get(primaryId) ??
       store.submeshes.get(scope.submeshName) ??
       store.texture ??
       DEFAULT_RECOLOR,
@@ -109,8 +113,10 @@ export function writeScopeSettings(
     return;
   }
 
-  // Always persist island values, including explicit resets to default.
-  store.islands.set(scope.id, next);
+  // Apply the same values to every selected island.
+  for (const id of scope.ids) {
+    store.islands.set(id, cloneSettings(next));
+  }
 }
 
 /**

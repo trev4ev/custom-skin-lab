@@ -304,6 +304,8 @@ export function drawUvOverlay(
   opts: {
     submeshFilter?: string | null;
     selectedIslandId?: number | null;
+    /** Multi-select; takes precedence over selectedIslandId when non-empty. */
+    selectedIslandIds?: number[] | null;
     hoveredIslandId?: number | null;
     selectedSubmesh?: string | null;
   } = {},
@@ -313,11 +315,18 @@ export function drawUvOverlay(
 
   // Expand hover/selection to every island that reuses the same UV footprint,
   // matching the 3D mesh highlight behavior for mirrored/duplicated parts.
-  const selectedIds = new Set(
-    opts.selectedIslandId != null
-      ? islandsSharingUv(index, opts.selectedIslandId).map((i) => i.id)
-      : [],
-  );
+  const selectedIds = new Set<number>();
+  if (opts.selectedIslandIds?.length) {
+    for (const id of opts.selectedIslandIds) {
+      for (const shared of islandsSharingUv(index, id)) {
+        selectedIds.add(shared.id);
+      }
+    }
+  } else if (opts.selectedIslandId != null) {
+    for (const shared of islandsSharingUv(index, opts.selectedIslandId)) {
+      selectedIds.add(shared.id);
+    }
+  }
   const hoveredIds = new Set(
     opts.hoveredIslandId != null
       ? islandsSharingUv(index, opts.hoveredIslandId).map((i) => i.id)
@@ -332,7 +341,7 @@ export function drawUvOverlay(
   for (const island of islands) {
     if (opts.submeshFilter && island.submeshName !== opts.submeshFilter) continue;
     const isSelectedSubmesh =
-      opts.selectedSubmesh === island.submeshName && opts.selectedIslandId == null;
+      opts.selectedSubmesh === island.submeshName && selectedIds.size === 0;
 
     // Hover keeps a filled tint; selection is outline-only so the texture stays readable.
     const isHovered = hoveredIds.has(island.id);

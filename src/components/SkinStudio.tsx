@@ -25,7 +25,6 @@ import {
   buildIslandIndex,
   drawUvOverlay,
   hitTestIsland,
-  islandsForSubmesh,
   islandsSharingUv,
   type IslandIndex,
 } from "@/lib/uv-islands";
@@ -35,16 +34,84 @@ import { packModpkg, slugify } from "@/lib/modpkg/pack";
 type Selection =
   | null
   | { type: "submesh"; name: string }
-  | { type: "island"; id: number; submeshName: string };
+  | { type: "island"; ids: number[]; submeshName: string };
 
 function scopeFromSelection(selection: Selection): EditScope {
   if (!selection) return { type: "texture" };
   if (selection.type === "submesh") return { type: "submesh", name: selection.name };
   return {
     type: "island",
-    id: selection.id,
+    ids: selection.ids,
     submeshName: selection.submeshName,
   };
+}
+
+/** True if `islandId` (or any UV-shared sibling) is already in the island selection. */
+function selectionHasIsland(
+  selection: Selection,
+  islandIndex: IslandIndex,
+  islandId: number,
+): boolean {
+  if (selection?.type !== "island") return false;
+  const group = new Set(
+    islandsSharingUv(islandIndex, islandId).map((i) => i.id),
+  );
+  return selection.ids.some((id) => group.has(id));
+}
+
+function selectIsland(
+  selection: Selection,
+  islandIndex: IslandIndex,
+  island: { id: number; submeshName: string; faceCount: number },
+  shiftKey: boolean,
+): Selection {
+  if (
+    shiftKey &&
+    selection?.type === "island" &&
+    selection.submeshName === island.submeshName
+  ) {
+    if (selectionHasIsland(selection, islandIndex, island.id)) {
+      const group = new Set(
+        islandsSharingUv(islandIndex, island.id).map((i) => i.id),
+      );
+      const nextIds = selection.ids.filter((id) => !group.has(id));
+      if (nextIds.length === 0) {
+        return { type: "submesh", name: island.submeshName };
+      }
+      return {
+        type: "island",
+        ids: nextIds,
+        submeshName: selection.submeshName,
+      };
+    }
+    return {
+      type: "island",
+      ids: [...selection.ids, island.id],
+      submeshName: selection.submeshName,
+    };
+  }
+  return {
+    type: "island",
+    ids: [island.id],
+    submeshName: island.submeshName,
+  };
+}
+
+function islandSelectionStatus(
+  islandIndex: IslandIndex,
+  selection: Extract<Selection, { type: "island" }>,
+): string {
+  const count = selection.ids.length;
+  if (count > 1) {
+    return `Selected ${count} UV islands in ${selection.submeshName}. Edits apply to all.`;
+  }
+  const id = selection.ids[0]!;
+  const island = islandIndex.islands.find((i) => i.id === id);
+  const linked = islandsSharingUv(islandIndex, id).length;
+  const faces = island?.faceCount ?? 0;
+  return linked > 1
+    ? `Selected island #${id} in ${selection.submeshName} (${faces} faces) · ${linked} mesh pieces share this UV.`
+    : `Selected island #${id} in ${selection.submeshName} (${faces} faces). Edits apply only here.`;
 }
 
 function fileToImage(file: File): Promise<HTMLImageElement> {
@@ -90,6 +157,7 @@ export function SkinStudio() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [showOverlay, setShowOverlay] = useState(true);
+  const [textureExpanded, setTextureExpanded] = useState(false);
   const [islandIndex, setIslandIndex] = useState<IslandIndex | null>(null);
   const [activeSubmesh, setActiveSubmesh] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -126,11 +194,6 @@ export function SkinStudio() {
     return islandIndex.mesh.submeshes.map((s) => s.name);
   }, [islandIndex]);
 
-  const activeIslands = useMemo(() => {
-    if (!islandIndex || !activeSubmesh) return [];
-    return islandsForSubmesh(islandIndex, activeSubmesh);
-  }, [islandIndex, activeSubmesh]);
-
   const getEditStore = useCallback((exportPath: string): TextureEditStore => {
     let store = editsByPathRef.current.get(exportPath);
     if (!store) {
@@ -154,7 +217,7 @@ export function SkinStudio() {
     }
     drawUvOverlay(ctx, islandIndex, overlay.width, overlay.height, {
       submeshFilter: activeSubmesh,
-      selectedIslandId: selection?.type === "island" ? selection.id : null,
+      selectedIslandIds: selection?.type === "island" ? selection.ids : null,
       hoveredIslandId,
       // Only mark submesh-selected when that is the actual selection scope.
       // Using activeSubmesh here painted every island blue and hid hover.
@@ -221,6 +284,15 @@ export function SkinStudio() {
     applyRecolor();
     redrawOverlay();
   }, [applyRecolor, redrawOverlay]);
+
+  useEffect(() => {
+    if (!textureExpanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTextureExpanded(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [textureExpanded]);
 
   const bakeCurrentPreview = useCallback(() => {
     const preview = previewCanvasRef.current;
@@ -454,19 +526,17 @@ export function SkinStudio() {
 
     const hit = hitTestIsland(islandIndex, uv.u, uv.v, activeSubmesh);
     if (hit) {
-      setSelection({ type: "island", id: hit.id, submeshName: hit.submeshName });
+      const next = selectIsland(selection, islandIndex, hit, e.shiftKey);
+      setSelection(next);
       setActiveSubmesh(hit.submeshName);
       setHoveredIslandId(hit.id);
-      setStatus(
-        (() => {
-          const linked = islandsSharingUv(islandIndex, hit.id).length;
-          return linked > 1
-            ? `Selected island #${hit.id} in ${hit.submeshName} (${hit.faceCount} faces) · ${linked} mesh pieces share this UV.`
-            : `Selected island #${hit.id} in ${hit.submeshName} (${hit.faceCount} faces). Edits apply only here.`;
-        })(),
-      );
+      if (next?.type === "island") {
+        setStatus(islandSelectionStatus(islandIndex, next));
+      } else if (next?.type === "submesh") {
+        setStatus(`Editing whole ${next.name} submesh.`);
+      }
       void switchToTexture(textureForSubmesh(champion, hit.submeshName));
-    } else if (activeSubmesh) {
+    } else if (activeSubmesh && !e.shiftKey) {
       setSelection({ type: "submesh", name: activeSubmesh });
       setStatus(`No island under cursor — editing whole ${activeSubmesh} submesh.`);
     }
@@ -503,36 +573,26 @@ export function SkinStudio() {
     setHoveredIslandId(islandId);
   }
 
-  function onModelSelectIsland(islandId: number) {
+  function onModelSelectIsland(islandId: number, opts: { shiftKey: boolean }) {
     if (!islandIndex) return;
     const island = islandIndex.islands.find((i) => i.id === islandId);
     if (!island) return;
-    setSelection({ type: "island", id: island.id, submeshName: island.submeshName });
+    const next = selectIsland(selection, islandIndex, island, opts.shiftKey);
+    setSelection(next);
     setActiveSubmesh(island.submeshName);
     setHoveredIslandId(island.id);
-    const linked = islandsSharingUv(islandIndex, island.id).length;
-    setStatus(
-      linked > 1
-        ? `Selected island #${island.id} in ${island.submeshName} (${island.faceCount} faces) · ${linked} mesh pieces share this UV.`
-        : `Selected island #${island.id} in ${island.submeshName} (${island.faceCount} faces). Edits apply only here.`,
-    );
+    if (next?.type === "island") {
+      setStatus(islandSelectionStatus(islandIndex, next));
+    } else if (next?.type === "submesh") {
+      setStatus(`Editing whole ${next.name} submesh.`);
+    }
     void switchToTexture(textureForSubmesh(champion, island.submeshName));
   }
 
-
-  const selectedIslandId =
-    selection?.type === "island" ? selection.id : null;
-
-  const selectedSharedIds = useMemo(() => {
-    if (!islandIndex || selection?.type !== "island") return null;
-    return new Set(islandsSharingUv(islandIndex, selection.id).map((i) => i.id));
-  }, [islandIndex, selection]);
-
-  const hoveredSharedIds = useMemo(() => {
-    if (!islandIndex || hoveredIslandId == null) return null;
-    return new Set(islandsSharingUv(islandIndex, hoveredIslandId).map((i) => i.id));
-  }, [islandIndex, hoveredIslandId]);
-
+  const selectedIslandIds = useMemo(
+    () => (selection?.type === "island" ? selection.ids : []),
+    [selection],
+  );
 
   function imageDataToPngBase64(image: ImageData): string {
     const c = document.createElement("canvas");
@@ -638,141 +698,193 @@ Generated by Custom Skin Lab
     ? "Entire texture"
     : selection.type === "submesh"
       ? `Submesh: ${selection.name}`
-      : `Island #${selection.id} (${selection.submeshName})`;
+      : selection.ids.length > 1
+        ? `${selection.ids.length} islands (${selection.submeshName})`
+        : `Island #${selection.ids[0]} (${selection.submeshName})`;
 
   return (
-    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-8 px-6 py-10 md:px-8 md:py-14">
-      <header className="flex flex-col gap-3">
-        <p className="text-sm font-medium tracking-[0.2em] text-copper uppercase">
-          Custom Skin Lab
-        </p>
-        <h1 className="max-w-2xl font-display text-4xl leading-tight text-ink md:text-5xl">
-          Recolor islands. Export a playable `.modpkg`.
-        </h1>
-        <p className="max-w-2xl text-base leading-relaxed text-ink/70">
-          Pick a submesh (Body, Tails, …), click a UV island, then recolor only that
-          part. Inspect the live result on the bind-pose mesh — drag to orbit.
-        </p>
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-chrome text-ink">
+      <header className="relative z-20 flex shrink-0 items-center gap-3 border-b border-border bg-chrome/90 px-3 py-2.5 backdrop-blur-md md:px-4">
+        <div className="min-w-0 shrink">
+          <p className="text-[11px] font-medium tracking-[0.22em] text-copper uppercase">
+            Custom Skin Lab
+          </p>
+          <p className="truncate text-[11px] text-muted">
+            {loadingTexture || loadingMesh
+              ? "Loading…"
+              : `${selectionLabel} · ${texturePath.split("/").pop()}`}
+          </p>
+        </div>
+
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <label className="flex items-center gap-2 text-xs text-muted">
+            <span className="hidden lg:inline">Champion</span>
+            <select
+              value={champion.id}
+              onChange={(e) => {
+                const next = CHAMPIONS.find((c) => c.id === e.target.value);
+                if (next) selectChampion(next);
+              }}
+              className="field !w-auto min-w-[8.5rem] !rounded-lg !py-1.5 !text-sm"
+            >
+              {CHAMPIONS.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                  {c.sknUrl ? "" : " (no mesh)"}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <button
+            type="button"
+            disabled={loadingTexture}
+            onClick={() => {
+              const gen = ++loadGenRef.current;
+              setIslandIndex(null);
+              setActiveSubmesh(null);
+              setSelection(null);
+              setHoveredIslandId(null);
+              setLoadingMesh(!!champion.sknUrl);
+              setStatus(`Loading ${champion.name}…`);
+              void loadStarterTexture(champion, gen);
+            }}
+            className="rounded-full border border-border bg-chip px-3 py-1.5 text-xs font-medium text-ink/85 transition hover:bg-surface disabled:opacity-40"
+          >
+            Reset
+          </button>
+
+          <label className="cursor-pointer rounded-full border border-border bg-chip px-3 py-1.5 text-xs font-medium text-ink/85 transition hover:bg-surface">
+            Upload
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => void onUpload(e.target.files?.[0])}
+            />
+          </label>
+
+          <button
+            type="button"
+            disabled={exporting || !hasImage || loadingTexture}
+            onClick={() => void onExport()}
+            className="rounded-full bg-copper px-3.5 py-1.5 text-xs font-semibold text-paper transition hover:bg-copper/90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {exporting ? "Building…" : "Download .modpkg"}
+          </button>
+        </div>
       </header>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex min-w-[200px] flex-col gap-1.5">
-          <span className="text-xs font-semibold tracking-wide text-ink/60 uppercase">
-            Champion
-          </span>
-          <select
-            value={champion.id}
-            onChange={(e) => {
-              const next = CHAMPIONS.find((c) => c.id === e.target.value);
-              if (next) selectChampion(next);
-            }}
-            className="field"
-          >
-            {CHAMPIONS.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-                {c.sknUrl ? "" : " (no mesh)"}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <div className="relative min-h-0 flex-1 bg-stage">
+        <ModelViewer
+          mesh={islandIndex?.mesh ?? null}
+          champion={champion}
+          revision={modelRevision}
+          activeExportPath={texturePath}
+          previewCanvasRef={previewCanvasRef}
+          bakedByPathRef={bakedByPathRef}
+          islandIndex={islandIndex}
+          hoverIslandId={hoveredIslandId}
+          selectedIslandIds={selectedIslandIds}
+          onHoverIsland={onModelHoverIsland}
+          onSelectIsland={onModelSelectIsland}
+          className="absolute inset-0"
+        />
 
-      <section className="rounded-2xl border border-ink/10 bg-panel/80 p-5 shadow-soft backdrop-blur md:p-6">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="font-display text-xl text-ink">Preview</h2>
-              <p className="text-xs text-ink/50">
-                {loadingTexture || loadingMesh
-                  ? "Loading…"
-                  : `Editing: ${selectionLabel} · ${texturePath.split("/").pop()}`}
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
+        {/* Texture map — top left of the 3D stage */}
+        <div
+          className={`pointer-events-none absolute top-3 left-3 flex flex-col gap-2 transition-[width] duration-200 md:top-4 md:left-4 ${
+            textureExpanded
+              ? "z-20 w-[min(720px,78vw)]"
+              : "z-10 w-[min(260px,38vw)] md:w-[min(300px,28vw)]"
+          }`}
+        >
+          <div className="pointer-events-auto overflow-hidden rounded-xl border border-border bg-overlay shadow-soft backdrop-blur-md">
+            <div className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-1.5">
+              <span className="text-[10px] font-semibold tracking-wide text-muted uppercase">
+                Texture
+              </span>
               <button
                 type="button"
-                disabled={loadingTexture}
-                onClick={() => {
-                  const gen = ++loadGenRef.current;
-                  setIslandIndex(null);
-                  setActiveSubmesh(null);
-                  setSelection(null);
-                  setHoveredIslandId(null);
-                  setLoadingMesh(!!champion.sknUrl);
-                  setStatus(`Loading ${champion.name}…`);
-                  void loadStarterTexture(champion, gen);
-                }}
-                className="rounded-full border border-ink/15 bg-paper px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink/5 disabled:opacity-40"
+                disabled={!hasImage}
+                onClick={() => setTextureExpanded((v) => !v)}
+                className="inline-flex size-6 items-center justify-center rounded-md border border-border bg-chip text-ink/85 transition hover:bg-surface disabled:opacity-40"
+                aria-pressed={textureExpanded}
+                aria-label={
+                  textureExpanded
+                    ? "Shrink texture"
+                    : "Expand texture for easier island picking"
+                }
+                title={
+                  textureExpanded
+                    ? "Shrink texture (Esc)"
+                    : "Expand texture for easier island picking"
+                }
               >
-                Reset to starter
-              </button>
-              <label className="cursor-pointer rounded-full bg-ink px-4 py-2 text-sm font-medium text-paper transition hover:bg-ink/90">
-                Upload texture
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp"
-                  className="hidden"
-                  onChange={(e) => void onUpload(e.target.files?.[0])}
-                />
-              </label>
-            </div>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-            <div className="overflow-hidden rounded-xl border border-ink/10 bg-checker">
-              <canvas ref={sourceCanvasRef} className="hidden" />
-              <div
-                className={`relative mx-auto w-fit max-w-full ${hasImage ? "" : "min-h-[220px] w-full"}`}
-              >
-                <canvas
-                  ref={previewCanvasRef}
-                  className="block h-auto max-h-[min(420px,46vh)] max-w-full"
-                />
-                <canvas
-                  ref={overlayCanvasRef}
-                  onClick={onPreviewClick}
-                  onMouseMove={onPreviewMove}
-                  onMouseLeave={onPreviewLeave}
-                  className="absolute inset-0 h-full w-full cursor-crosshair"
-                />
-                {!hasImage && !loadingTexture && (
-                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-8 text-center text-sm text-ink/50">
-                    Choose a starter champion or upload an extracted texture.
-                  </div>
+                {textureExpanded ? (
+                  <svg
+                    viewBox="0 0 16 16"
+                    className="size-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    {/* Shrink: arrows toward center */}
+                    <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" />
+                  </svg>
+                ) : (
+                  <svg
+                    viewBox="0 0 16 16"
+                    className="size-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    {/* Expand: arrows toward corners */}
+                    <path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" />
+                  </svg>
                 )}
-              </div>
+              </button>
             </div>
-
-            <div>
-              <ModelViewer
-                mesh={islandIndex?.mesh ?? null}
-                champion={champion}
-                revision={modelRevision}
-                activeExportPath={texturePath}
-                previewCanvasRef={previewCanvasRef}
-                bakedByPathRef={bakedByPathRef}
-                islandIndex={islandIndex}
-                hoverIslandId={hoveredIslandId}
-                selectedIslandId={selectedIslandId}
-                onHoverIsland={onModelHoverIsland}
-                onSelectIsland={onModelSelectIsland}
+            <canvas ref={sourceCanvasRef} className="hidden" />
+            <div
+              className={`relative bg-checker ${hasImage ? "" : "min-h-[140px]"}`}
+            >
+              <canvas ref={previewCanvasRef} className="block h-auto w-full" />
+              <canvas
+                ref={overlayCanvasRef}
+                onClick={onPreviewClick}
+                onMouseMove={onPreviewMove}
+                onMouseLeave={onPreviewLeave}
+                className="absolute inset-0 h-full w-full cursor-crosshair"
               />
+              {!hasImage && !loadingTexture && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 text-center text-xs text-muted">
+                  Load a starter or upload a texture.
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-sm text-ink/80">
+          <div className="pointer-events-auto flex flex-wrap gap-1.5">
+            <label className="flex items-center gap-1.5 rounded-full border border-border bg-chip/90 px-2.5 py-1 text-[11px] text-ink/80 backdrop-blur-sm">
               <input
                 type="checkbox"
                 checked={showOverlay}
                 onChange={(e) => setShowOverlay(e.target.checked)}
-                className="size-4 accent-copper"
+                className="size-3 accent-copper"
               />
-              Show UV overlay
+              UV
             </label>
             <button
               type="button"
-              className="rounded-full border border-ink/15 px-3 py-1.5 text-xs font-medium text-ink/80 hover:bg-ink/5"
+              className="rounded-full border border-border bg-chip/90 px-2.5 py-1 text-[11px] text-ink/80 backdrop-blur-sm hover:bg-surface"
               onClick={() => {
                 setSelection(null);
                 setStatus("Editing entire texture.");
@@ -783,7 +895,7 @@ Generated by Custom Skin Lab
             {activeSubmesh && (
               <button
                 type="button"
-                className="rounded-full border border-ink/15 px-3 py-1.5 text-xs font-medium text-ink/80 hover:bg-ink/5"
+                className="rounded-full border border-border bg-chip/90 px-2.5 py-1 text-[11px] text-ink/80 backdrop-blur-sm hover:bg-surface"
                 onClick={() => void selectSubmesh(activeSubmesh)}
               >
                 Whole {activeSubmesh}
@@ -792,99 +904,40 @@ Generated by Custom Skin Lab
           </div>
 
           {submeshNames.length > 0 && (
-            <div className="mt-4">
-              <p className="mb-2 text-xs font-semibold tracking-wide text-ink/60 uppercase">
-                Level 1 · Submesh
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {submeshNames.map((name) => {
-                  const count = islandIndex
-                    ? islandsForSubmesh(islandIndex, name).length
-                    : 0;
-                  const active = activeSubmesh === name;
-                  const tex = textureForSubmesh(champion, name);
-                  const alt =
-                    tex.exportPath !== champion.defaultTexture.exportPath;
-                  return (
-                    <button
-                      key={name}
-                      type="button"
-                      title={
-                        alt
-                          ? `Uses ${tex.exportPath.split("/").pop()}`
-                          : `Uses default ${champion.defaultTexture.exportPath.split("/").pop()}`
-                      }
-                      onClick={() => void selectSubmesh(name)}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
-                        active
-                          ? "bg-copper text-paper"
-                          : "border border-ink/15 bg-paper text-ink hover:bg-ink/5"
-                      }`}
-                    >
-                      {name}
-                      <span className="ml-1 opacity-70">{count}</span>
-                      {alt && <span className="ml-1 opacity-80">↗</span>}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="pointer-events-auto flex max-h-24 flex-wrap gap-1 overflow-y-auto">
+              {submeshNames.map((name) => {
+                const active = activeSubmesh === name;
+                const tex = textureForSubmesh(champion, name);
+                const alt =
+                  tex.exportPath !== champion.defaultTexture.exportPath;
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    title={
+                      alt
+                        ? `Uses ${tex.exportPath.split("/").pop()}`
+                        : `Uses default ${champion.defaultTexture.exportPath.split("/").pop()}`
+                    }
+                    onClick={() => void selectSubmesh(name)}
+                    className={`rounded-full px-2 py-1 text-[10px] font-medium transition ${
+                      active
+                        ? "bg-copper text-paper"
+                        : "border border-border bg-chip/90 text-ink/75 backdrop-blur-sm hover:bg-surface"
+                    }`}
+                  >
+                    {name}
+                    {alt && <span className="ml-1 opacity-80">↗</span>}
+                  </button>
+                );
+              })}
             </div>
           )}
+        </div>
 
-          {activeIslands.length > 0 && (
-            <div className="mt-4">
-              <p className="mb-2 text-xs font-semibold tracking-wide text-ink/60 uppercase">
-                Level 2 · UV islands in {activeSubmesh} (click preview or pick below)
-              </p>
-              <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-                {activeIslands.slice(0, 40).map((island) => {
-                  const active = selectedSharedIds?.has(island.id) ?? false;
-                  const hovered =
-                    !active && (hoveredSharedIds?.has(island.id) ?? false);
-                  return (
-                    <button
-                      key={island.id}
-                      type="button"
-                      title={`${island.faceCount} faces`}
-                      onMouseEnter={() => setHoveredIslandId(island.id)}
-                      onMouseLeave={() => setHoveredIslandId(null)}
-                      onClick={() => {
-                        setSelection({
-                          type: "island",
-                          id: island.id,
-                          submeshName: island.submeshName,
-                        });
-                        setStatus(
-                          (() => {
-                            const linked = islandIndex
-                              ? islandsSharingUv(islandIndex, island.id).length
-                              : 1;
-                            return linked > 1
-                              ? `Selected island #${island.id} (${island.faceCount} faces) · ${linked} mesh pieces share this UV.`
-                              : `Selected island #${island.id} (${island.faceCount} faces).`;
-                          })(),
-                        );
-                      }}
-                      className={`rounded-md px-2 py-1 font-mono text-[10px] transition ${
-                        active || hovered
-                          ? "bg-amber-400 text-ink"
-                          : "bg-ink/5 text-ink/70 hover:bg-ink/10"
-                      }`}
-                    >
-                      #{island.id}
-                    </button>
-                  );
-                })}
-                {activeIslands.length > 40 && (
-                  <span className="px-2 py-1 text-[10px] text-ink/45">
-                    +{activeIslands.length - 40} more — click the preview to pick them
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-5 grid gap-4">
+        {/* Recolor sliders — right side of the 3D stage */}
+        <div className="pointer-events-none absolute top-3 right-3 z-10 w-[min(220px,42vw)] md:top-4 md:right-4 md:w-56">
+          <div className="pointer-events-auto flex flex-col gap-3 rounded-xl border border-border bg-overlay p-3 shadow-soft backdrop-blur-md md:p-4">
             <Slider
               label="Hue shift"
               min={-180}
@@ -899,7 +952,9 @@ Generated by Custom Skin Lab
               max={200}
               value={settings.saturation}
               suffix="%"
-              onChange={(saturation) => commitSettings({ ...settings, saturation })}
+              onChange={(saturation) =>
+                commitSettings({ ...settings, saturation })
+              }
             />
             <Slider
               label="Brightness"
@@ -907,78 +962,79 @@ Generated by Custom Skin Lab
               max={200}
               value={settings.brightness}
               suffix="%"
-              onChange={(brightness) => commitSettings({ ...settings, brightness })}
+              onChange={(brightness) =>
+                commitSettings({ ...settings, brightness })
+              }
             />
-            <label className="flex items-center gap-2 text-sm text-ink/80">
+            <label className="flex items-center gap-2 text-[11px] text-ink/75">
               <input
                 type="checkbox"
                 checked={settings.protectShadows}
                 onChange={(e) =>
-                  commitSettings({ ...settings, protectShadows: e.target.checked })
+                  commitSettings({
+                    ...settings,
+                    protectShadows: e.target.checked,
+                  })
                 }
-                className="size-4 accent-copper"
+                className="size-3.5 accent-copper"
               />
-              Protect deep shadows / linework
+              Protect shadows
             </label>
           </div>
-        </section>
+        </div>
 
-        <section className="flex flex-col gap-5 rounded-2xl border border-ink/10 bg-panel/80 p-5 shadow-soft backdrop-blur">
-          <h2 className="font-display text-xl text-ink">Mod package</h2>
+        {(status || error) && (
+          <div className="pointer-events-none absolute right-3 bottom-3 left-3 z-10 md:right-4 md:bottom-4 md:left-4">
+            {error && (
+              <p
+                className="mb-1 max-w-xl rounded-lg border border-copper/40 bg-copper/15 px-3 py-2 text-xs text-ink backdrop-blur-sm"
+                role="alert"
+              >
+                {error}
+              </p>
+            )}
+            {status && (
+              <p
+                className="max-w-xl rounded-lg border border-border bg-overlay px-3 py-2 text-xs text-muted backdrop-blur-sm"
+                role="status"
+              >
+                {status}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
 
+      <details className="shrink-0 border-t border-border bg-chrome/90 text-ink/80 open:pb-3">
+        <summary className="cursor-pointer px-4 py-2 text-xs font-semibold tracking-wide text-muted uppercase select-none">
+          Mod package details
+        </summary>
+        <div className="grid gap-3 px-4 pt-1 sm:grid-cols-3">
           <Field label="Skin name">
             <input
-              className="field"
+              className="field !rounded-lg !py-2 !text-sm"
               value={skinName}
               onChange={(e) => setSkinName(e.target.value)}
               placeholder="Ember Recolor"
             />
           </Field>
-
           <Field label="Author (optional)">
             <input
-              className="field"
+              className="field !rounded-lg !py-2 !text-sm"
               value={author}
               onChange={(e) => setAuthor(e.target.value)}
               placeholder="Your name"
             />
           </Field>
-
-          <Field label="Texture path inside WAD" hint={`Target archive: ${champion.wad}`}>
+          <Field label="Texture path inside WAD" hint={`Archive: ${champion.wad}`}>
             <input
-              className="field font-mono text-xs"
+              className="field !rounded-lg !py-2 font-mono !text-xs"
               value={texturePath}
               onChange={(e) => setTexturePath(e.target.value)}
             />
           </Field>
-
-          <div className="rounded-xl border border-dashed border-ink/15 bg-ink/[0.03] p-4 text-sm leading-relaxed text-ink/65">
-            Selection scope: <span className="text-ink">{selectionLabel}</span>.
-            Island edits are remembered when you switch islands; editing a whole
-            submesh (or the entire texture) replaces nested island values for that
-            scope. Export writes the composed preview.
-          </div>
-
-          <button
-            type="button"
-            disabled={exporting || !hasImage || loadingTexture}
-            onClick={() => void onExport()}
-            className="mt-auto rounded-full bg-copper px-5 py-3 text-sm font-semibold text-paper transition hover:bg-copper/90 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {exporting ? "Building .modpkg…" : "Download .modpkg"}
-          </button>
-
-          {error && (
-            <p className="text-sm text-red-700" role="alert">
-              {error}
-            </p>
-          )}
-          {status && (
-            <p className="text-sm text-ink/70" role="status">
-              {status}
-            </p>
-          )}
-        </section>
+        </div>
+      </details>
     </div>
   );
 }
@@ -994,11 +1050,11 @@ function Field({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-semibold tracking-wide text-ink/60 uppercase">
+      <span className="text-[10px] font-semibold tracking-wide text-muted uppercase">
         {label}
       </span>
       {children}
-      {hint && <span className="text-xs text-ink/45">{hint}</span>}
+      {hint && <span className="text-[10px] text-muted">{hint}</span>}
     </label>
   );
 }
@@ -1019,10 +1075,10 @@ function Slider({
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="grid gap-2">
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-ink/70">{label}</span>
-        <span className="font-mono text-ink">
+    <label className="grid gap-1.5">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-muted">{label}</span>
+        <span className="font-mono text-ink/90">
           {value}
           {suffix}
         </span>
@@ -1033,7 +1089,7 @@ function Slider({
         max={max}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="accent-copper"
+        className="w-full accent-copper"
       />
     </label>
   );

@@ -1,30 +1,59 @@
 @import "tailwindcss";
 
 :root {
-  --paper: #f3efe6;
-  --panel: #fffaf2;
-  --ink: #1c2430;
-  --copper: #b85a2a;
-  --wash-a: #d9e4df;
-  --wash-b: #f0d9c4;
-  --shadow-soft: 0 18px 50px rgba(28, 36, 48, 0.08);
+  --palette-red: #e63946;
+  --palette-cream: #f1faee;
+  --palette-teal: #a8dadc;
+  --palette-blue: #457b9d;
+  --palette-navy: #1d3557;
+
+  --ink: var(--palette-cream);
+  --muted: color-mix(in oklab, var(--palette-cream) 58%, transparent);
+  --paper: var(--palette-cream);
+  --chrome: var(--palette-navy);
+  --surface: color-mix(in oklab, var(--palette-navy) 72%, var(--palette-blue));
+  --chip: color-mix(in oklab, var(--palette-navy) 62%, black);
+  --border: color-mix(in oklab, var(--palette-cream) 16%, transparent);
+  --stage: #0a121c;
+  --stage-checker-a: #0a121c;
+  --stage-checker-b: #152536;
+  --copper: var(--palette-red);
+  --panel: color-mix(in oklab, var(--palette-navy) 78%, var(--palette-blue));
+  --wash-a: var(--palette-teal);
+  --wash-b: var(--palette-blue);
+  --overlay: color-mix(in oklab, var(--palette-navy) 78%, transparent);
+  --shadow-soft: 0 18px 50px rgba(0, 0, 0, 0.4);
+  --checker-a: color-mix(in oklab, var(--palette-navy) 70%, var(--palette-teal));
+  --checker-b: color-mix(in oklab, var(--palette-navy) 85%, black);
 }
 
 @theme inline {
   --color-paper: var(--paper);
   --color-panel: var(--panel);
   --color-ink: var(--ink);
+  --color-muted: var(--muted);
   --color-copper: var(--copper);
+  --color-chrome: var(--chrome);
+  --color-surface: var(--surface);
+  --color-chip: var(--chip);
+  --color-border: var(--border);
+  --color-stage: var(--stage);
+  --color-overlay: var(--overlay);
+  --color-teal: var(--palette-teal);
+  --color-blue: var(--palette-blue);
+  --color-navy: var(--palette-navy);
+  --color-accent: var(--palette-red);
   --font-sans: var(--font-sans);
   --font-display: var(--font-display);
   --shadow-soft: var(--shadow-soft);
 }
 
+html {
+  color-scheme: dark;
+}
+
 body {
-  background:
-    radial-gradient(1200px 600px at 10% -10%, var(--wash-a), transparent 60%),
-    radial-gradient(900px 500px at 100% 0%, var(--wash-b), transparent 55%),
-    linear-gradient(180deg, #f7f3eb 0%, var(--paper) 45%, #ebe4d8 100%);
+  background: var(--chrome);
   color: var(--ink);
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
@@ -36,8 +65,8 @@ body {
 .field {
   width: 100%;
   border-radius: 0.75rem;
-  border: 1px solid color-mix(in oklab, var(--ink) 12%, transparent);
-  background: color-mix(in oklab, white 80%, var(--panel));
+  border: 1px solid var(--border);
+  background: var(--panel);
   padding: 0.7rem 0.85rem;
   color: var(--ink);
   outline: none;
@@ -49,14 +78,25 @@ body {
 }
 
 .bg-checker {
-  background-color: #ddd6c8;
+  background-color: var(--checker-a);
   background-image:
-    linear-gradient(45deg, #cfc6b6 25%, transparent 25%),
-    linear-gradient(-45deg, #cfc6b6 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #cfc6b6 75%),
-    linear-gradient(-45deg, transparent 75%, #cfc6b6 75%);
+    linear-gradient(45deg, var(--checker-b) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-b) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%);
   background-size: 24px 24px;
   background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+}
+
+.bg-stage-checker {
+  background-color: var(--stage-checker-a);
+  background-image:
+    linear-gradient(45deg, var(--stage-checker-b) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--stage-checker-b) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--stage-checker-b) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--stage-checker-b) 75%);
+  background-size: 32px 32px;
+  background-position: 0 0, 0 16px, 16px -16px, -16px 0;
 }
 
 .shadow-soft {

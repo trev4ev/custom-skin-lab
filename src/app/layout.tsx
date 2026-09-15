@@ -22,7 +22,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} h-full`}>
-      <body className="min-h-full font-sans text-ink antialiased">{children}</body>
+      <body className="min-h-full bg-chrome font-sans text-ink antialiased">
+        {children}
+      </body>
     </html>
   );
 }

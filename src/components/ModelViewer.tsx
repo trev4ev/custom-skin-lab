@@ -22,12 +22,12 @@ export type ModelViewerProps = {
   islandIndex?: IslandIndex | null;
   /** Island under the pointer — filled tint on the mesh. */
   hoverIslandId?: number | null;
-  /** Selected island — outline only so recolors stay visible. */
-  selectedIslandId?: number | null;
+  /** Selected islands — outline only so recolors stay visible. */
+  selectedIslandIds?: number[] | null;
   /** Fired when the pointer hovers a mesh island (or null when leaving). */
   onHoverIsland?: (islandId: number | null) => void;
   /** Fired when the user clicks a mesh island. */
-  onSelectIsland?: (islandId: number) => void;
+  onSelectIsland?: (islandId: number, opts: { shiftKey: boolean }) => void;
   className?: string;
 };
 
@@ -94,7 +94,7 @@ export function ModelViewer({
   bakedByPathRef,
   islandIndex = null,
   hoverIslandId = null,
-  selectedIslandId = null,
+  selectedIslandIds = null,
   onHoverIsland,
   onSelectIsland,
   className,
@@ -125,13 +125,14 @@ export function ModelViewer({
     if (!mount) return;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1814);
+    scene.background = null;
 
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 5000);
     camera.position.set(120, 70, 150);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setClearColor(0x000000, 0);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     // Fill the mount box exactly
@@ -142,16 +143,15 @@ export function ModelViewer({
     rendererRef.current = renderer;
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
+    controls.enableDamping = false;
     controls.target.set(0, 0, 0);
     controlsRef.current = controls;
 
-    scene.add(new THREE.HemisphereLight(0xfff2e0, 0x2a241c, 1.15));
+    scene.add(new THREE.HemisphereLight(0xf1faee, 0x1d3557, 1.15));
     const key = new THREE.DirectionalLight(0xffffff, 1.35);
     key.position.set(80, 140, 100);
     scene.add(key);
-    const fill = new THREE.DirectionalLight(0xb8d4ff, 0.45);
+    const fill = new THREE.DirectionalLight(0xa8dadc, 0.45);
     fill.position.set(-100, 60, -80);
     scene.add(fill);
 
@@ -247,12 +247,12 @@ export function ModelViewer({
   /** Hover = filled tint; selection = outline only (recolors stay readable). */
   const setIslandHighlights = (
     hoverId: number | null,
-    selectedId: number | null,
+    selectedIds: number[],
   ) => {
     const root = rootRef.current;
     clearHighlight();
     if (!root) return;
-    if (hoverId == null && selectedId == null) return;
+    if (hoverId == null && selectedIds.length === 0) return;
 
     const group = new THREE.Group();
     group.name = "__island_highlights";
@@ -269,7 +269,7 @@ export function ModelViewer({
         const fill = new THREE.Mesh(
           geo,
           new THREE.MeshBasicMaterial({
-            color: 0xff9a2e,
+            color: 0xe63946,
             transparent: true,
             opacity: 0.5,
             side: THREE.DoubleSide,
@@ -283,7 +283,7 @@ export function ModelViewer({
         const hoverEdges = new THREE.LineSegments(
           new THREE.EdgesGeometry(geo, 40),
           new THREE.LineBasicMaterial({
-            color: 0xffe6a0,
+            color: 0xa8dadc,
             transparent: true,
             opacity: 0.9,
             depthTest: false,
@@ -295,7 +295,16 @@ export function ModelViewer({
       }
     }
 
-    if (selectedId != null) {
+    // Deduplicate UV-shared groups so mirrored pieces aren't outlined twice.
+    const outlined = new Set<number>();
+    for (const selectedId of selectedIds) {
+      if (outlined.has(selectedId)) continue;
+      const shared = islandIndex
+        ? islandsSharingUv(islandIndex, selectedId)
+        : [];
+      for (const s of shared) outlined.add(s.id);
+      outlined.add(selectedId);
+
       const positions = islandPositions(selectedId);
       if (positions) {
         const geo = new THREE.BufferGeometry();
@@ -307,7 +316,7 @@ export function ModelViewer({
         const outline = new THREE.LineSegments(
           new THREE.EdgesGeometry(geo, 25),
           new THREE.LineBasicMaterial({
-            color: 0xffd65a,
+            color: 0xe63946,
             transparent: true,
             opacity: 1,
             depthTest: false,
@@ -584,7 +593,7 @@ export function ModelViewer({
       const dy = e.clientY - down.y;
       if (dx * dx + dy * dy > 25) return; // treat as orbit, not click
       const id = pickIsland(e.clientX, e.clientY);
-      if (id != null) onSelectIslandRef.current?.(id);
+      if (id != null) onSelectIslandRef.current?.(id, { shiftKey: e.shiftKey });
     };
 
     el.addEventListener("pointermove", onMove);
@@ -602,19 +611,18 @@ export function ModelViewer({
 
   // Hover fill + selection outline on the 3D mesh.
   useEffect(() => {
-    setIslandHighlights(hoverIslandId ?? null, selectedIslandId ?? null);
+    setIslandHighlights(hoverIslandId ?? null, selectedIslandIds ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hoverIslandId, selectedIslandId, islandIndex, mesh]);
+  }, [hoverIslandId, selectedIslandIds, islandIndex, mesh]);
 
   return (
-    <div className={`relative flex w-full flex-col ${className ?? ""}`}>
+    <div className={`relative h-full w-full min-h-0 ${className ?? ""}`}>
       <div
         ref={mountRef}
-        className="h-full max-h-[min(420px,46vh)] min-h-[260px] w-full touch-none overflow-hidden rounded-xl bg-[#1a1814]"
-        style={{ height: "min(420px, 46vh)" }}
+        className="bg-stage-checker absolute inset-0 touch-none overflow-hidden"
       />
       {!mesh && (
-        <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-paper/50">
+        <p className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center text-sm text-muted">
           Load a champion mesh to inspect in 3D.
         </p>
       )}
